@@ -2,6 +2,7 @@
  * LightBeam - rotating light beam with soft edges.
  *
  * Apex fixed at CENTER of screen, beam rotates 360° following mouse.
+ * Outputs HDR values to work with Bloom post-processing.
  */
 
 import * as THREE from 'three';
@@ -15,23 +16,29 @@ const vertexShader = `
   }
 `;
 
+// Fragment shader 输出 HDR 值，配合 Bloom 后处理
 const fragmentShader = `
   uniform vec3 uColor;
   uniform float uOpacity;
+  uniform float uBrightness;
 
   varying vec2 vUv;
 
   void main() {
-    // Vertical: apex (y=1) is opaque, base (y=0) fades out
-    float verticalFade = pow(vUv.y, 0.5);
+    // 垂直渐变: 顶点亮，底部淡
+    float verticalFade = pow(vUv.y, 0.4);
 
-    // Horizontal: center is opaque, edges fade
+    // 水平边缘: 中心亮，边缘淡
     float centerDist = abs(vUv.x - 0.5) * 2.0;
-    float edgeFade = 1.0 - pow(centerDist, 1.5);
+    float edgeFade = 1.0 - pow(centerDist, 1.2);
 
-    float alpha = verticalFade * edgeFade * uOpacity;
+    // 底部淡出
+    float baseFade = smoothstep(0.0, 0.2, vUv.y);
 
-    gl_FragColor = vec4(uColor, alpha);
+    float alpha = verticalFade * edgeFade * baseFade * uOpacity;
+
+    // 输出 HDR 值 (brightness > 1.0)，让 Bloom 生效
+    gl_FragColor = vec4(uColor * uBrightness, alpha);
   }
 `;
 
@@ -52,48 +59,37 @@ export class LightBeam {
       uniforms: {
         uColor: { value: new THREE.Color(CONFIG.color) },
         uOpacity: { value: CONFIG.opacity },
+        uBrightness: { value: CONFIG.brightness },
       },
       vertexShader,
       fragmentShader,
       transparent: true,
       depthWrite: false,
       side: THREE.DoubleSide,
+      toneMapped: false,  // 重要：禁用 tone mapping 保留 HDR 值
     });
 
     this.mesh = new THREE.Mesh(this.geometry, this.material);
-    this.update(0, 0);
+    this.update(0, -1);  // 初始指向下方
   }
 
-  /**
-   * Update beam rotation based on mouse position.
-   * @param {number} mouseX - normalized mouse X (-1 to 1)
-   * @param {number} mouseY - normalized mouse Y (-1 to 1)
-   */
   update(mouseX, mouseY) {
     const { width, length } = CONFIG.beam;
 
-    // Apex at center of screen
     const apexX = 0;
     const apexY = 0;
 
-    // Calculate angle from center to mouse position (360° rotation)
     const angle = Math.atan2(mouseY, mouseX);
-
     const halfWidth = width / 2;
 
-    // Direction from apex toward mouse
     const dirX = Math.cos(angle);
     const dirY = Math.sin(angle);
-
-    // Perpendicular for base width
     const perpX = -dirY;
     const perpY = dirX;
 
-    // Base center is at apex + direction * length
     const baseCenterX = apexX + dirX * length;
     const baseCenterY = apexY + dirY * length;
 
-    // Base left and right
     const leftX = baseCenterX - perpX * halfWidth;
     const leftY = baseCenterY - perpY * halfWidth;
     const rightX = baseCenterX + perpX * halfWidth;

@@ -1,8 +1,15 @@
 /**
- * Main - scene setup, mouse tracking, render loop.
+ * Main - scene setup with post-processing bloom effect.
  */
 
 import * as THREE from 'three';
+import {
+  EffectComposer,
+  EffectPass,
+  RenderPass,
+  BloomEffect,
+  KernelSize
+} from 'postprocessing';
 import { CONFIG } from './config.js';
 import { LightBeam } from './LightBeam.js';
 
@@ -24,7 +31,10 @@ const camera = new THREE.OrthographicCamera(
 camera.position.z = 1;
 
 // ---- Renderer ----
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({
+  antialias: true,
+  powerPreference: 'high-performance'
+});
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 document.body.appendChild(renderer.domElement);
@@ -33,12 +43,29 @@ document.body.appendChild(renderer.domElement);
 const beam = new LightBeam();
 scene.add(beam.mesh);
 
+// ---- Post-Processing: Bloom Effect ----
+const composer = new EffectComposer(renderer);
+
+// First pass: render the scene
+composer.addPass(new RenderPass(scene, camera));
+
+// Second pass: bloom effect
+const bloomEffect = new BloomEffect({
+  intensity: CONFIG.bloom.intensity,
+  luminanceThreshold: CONFIG.bloom.luminanceThreshold,
+  luminanceSmoothing: CONFIG.bloom.luminanceSmoothing,
+  mipmapBlur: true,
+  radius: CONFIG.bloom.radius,
+  kernelSize: KernelSize.LARGE,
+});
+
+composer.addPass(new EffectPass(camera, bloomEffect));
+
 // ---- Mouse State ----
 let mouseX = 0;
-let mouseY = -1; // Start pointing down
+let mouseY = -1;
 
 window.addEventListener('mousemove', (e) => {
-  // Normalize to -1 to 1, with Y flipped (screen Y is inverted)
   mouseX = (e.clientX / window.innerWidth) * 2 - 1;
   mouseY = -((e.clientY / window.innerHeight) * 2 - 1);
 });
@@ -46,17 +73,24 @@ window.addEventListener('mousemove', (e) => {
 // ---- Resize ----
 window.addEventListener('resize', () => {
   aspect = window.innerWidth / window.innerHeight;
-  camera.left   = -frustum * aspect / 2;
-  camera.right  =  frustum * aspect / 2;
+  camera.left = -frustum * aspect / 2;
+  camera.right = frustum * aspect / 2;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  renderer.setSize(width, height);
+  composer.setSize(width, height);
 });
 
 // ---- Render Loop ----
 function animate() {
   requestAnimationFrame(animate);
   beam.update(mouseX, mouseY);
-  renderer.render(scene, camera);
+  composer.render();  // 使用 composer 而不是 renderer
 }
 
 animate();
+
+console.log('Light Beam with Bloom initialized');
+console.log('Bloom config:', CONFIG.bloom);
