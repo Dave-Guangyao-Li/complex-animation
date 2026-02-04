@@ -4,95 +4,83 @@
 WebGL/Three.js light beam effect - like a flashlight shining down from a fixed point.
 The beam **rotates** around the light source (apex) to follow the mouse cursor.
 
+## Target Effect
+参考 Figma 设计，目标效果特征：
+- 光从顶点（光源）向下散射
+- **极度柔和的边缘** — 像高斯模糊，完全没有硬边
+- **顶点集中** — 光源点很小
+- **向下渐淡** — 越往下越淡、越散
+- **自然消失** — 底部没有截断感
+
 ## Figma Reference
 - Design: https://www.figma.com/design/oVasmPVZuoLyC6fBKoOxlX/ego?node-id=2778-111030
-- Use for **width reference only** (~392px at base)
-- Beam should **extend to bottom of viewport**
 
 ---
 
-## Key Behaviors
+## Current Status
 
-### Mouse Tracking (Rotation)
-- Light source (apex) is **fixed** at top-center
-- Beam **rotates** around apex to follow mouse (like flashlight)
-- Mouse left → beam rotates left, mouse right → beam rotates right
+### ✅ 已实现
+- [x] 光源在画面中心，360度旋转跟随鼠标
+- [x] 基础三角形几何体 + shader
+- [x] 简单的垂直渐变和边缘渐变
 
-### Visual Effect
-- **Top (apex)**: concentrated, darker, less blur
-- **Bottom (base)**: scattered, softer, more blur/fade
-- Triangle extends from top to **bottom of viewport**
-- Edges should be soft/blurred, not hard lines
-
----
-
-## TODO Checklist
-
-### Phase 0: Project Setup ✓
-- [x] package.json, npm install, index.html, vite
-
-### Phase 1: Rotating Beam + Basic Blur (CURRENT)
-- [ ] **1.1** Light source fixed at top-center of screen
-- [ ] **1.2** Triangle extends to bottom of viewport
-- [ ] **1.3** Beam rotates around apex following mouse (rotation, not translation)
-- [ ] **1.4** Basic shader: top=concentrated, bottom=scattered/soft
-- [ ] **1.5** Soft edges (simple blur gradient)
-- [ ] **1.6** Verify: beam rotates like flashlight, extends full height
-
-### Phase 2: Visual Polish (LATER)
-- [ ] Smooth rotation interpolation (lerp)
-- [ ] Fine-tune blur/scatter parameters
-- [ ] Animation effects
+### ❌ 待解决
+- [ ] 边缘不够柔和（目前仍有明显三角形轮廓）
+- [ ] 需要类似高斯模糊的散射效果
+- [ ] 底部截断感明显
 
 ---
 
-## Technical Approach
+## 失败尝试记录
 
-### Geometry
-```
-Apex (fixed):  (0, topY)           <- light source, doesn't move
-Base left:     rotate(angle) from apex
-Base right:    rotate(angle) from apex
-```
+### 尝试 1: 双层三角形叠加 (commit 6e84ee1, reverted)
 
-### Rotation Math
-```javascript
-// Mouse X (-1 to 1) → rotation angle
-const maxAngle = 0.3; // radians, ~17 degrees
-const angle = mouseX * maxAngle;
+**方法**：
+- 内层窄深 + 外层宽浅，两个三角形叠加
+- fragment shader 使用 `exp(-x²)` 高斯衰减
 
-// Base points rotate around apex
-const baseY = -1.0; // bottom of viewport
-const halfWidth = 0.28; // half of beam width at base
+**结果**：❌ 失败
+- 两层三角形的边缘仍然清晰可见
+- 看起来像两个重叠的三角形，不是柔和的光束
+- 没有真正的模糊效果
 
-// Rotated positions
-baseLeft.x  = apex.x + Math.sin(angle) * (baseY - apex.y) - Math.cos(angle) * halfWidth;
-baseRight.x = apex.x + Math.sin(angle) * (baseY - apex.y) + Math.cos(angle) * halfWidth;
-```
-
-### Shader (Simple)
-```glsl
-// Vertical gradient: top=opaque, bottom=transparent
-float fade = vUv.y; // 1 at top, 0 at bottom
-
-// Horizontal soft edges
-float edgeFade = 1.0 - pow(abs(vUv.x - 0.5) * 2.0, 2.0);
-
-float alpha = fade * edgeFade * uOpacity;
-```
+**教训**：
+- 单纯叠加多层三角形无法实现真正的模糊
+- 需要不同的技术方案
 
 ---
 
-## Configuration (`src/config.js`)
+## 待探索的方案
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `beam.width` | 0.56 | Base width (ref Figma 392px) |
-| `beam.topY` | 1.0 | Apex Y (top of viewport) |
-| `beam.bottomY` | -1.0 | Base Y (bottom of viewport) |
-| `color` | '#555555' | Beam color |
-| `opacity` | 0.6 | Max opacity at apex |
-| `mouse.maxAngle` | 0.3 | Max rotation in radians (~17°) |
+### 方案 A: Post-processing Blur
+使用 Three.js 后处理，对渲染结果应用高斯模糊
+- 优点：真正的模糊效果
+- 缺点：性能开销，可能影响其他元素
+
+### 方案 B: 更大的三角形 + 更激进的 shader 衰减
+- 三角形做得更大（超出可见区域）
+- shader 中使用更极端的衰减曲线
+- 让实际可见的部分是衰减后的中心区域
+
+### 方案 C: 径向渐变 Mesh
+- 不用三角形，改用圆形/椭圆形几何体
+- 从中心向外径向渐变
+- 可能更接近真实光散射效果
+
+### 方案 D: 纹理贴图
+- 预制一张柔和光束的纹理图
+- 直接作为贴图使用
+- 优点：效果可控
+- 缺点：不够灵活
+
+---
+
+## TODO
+
+- [ ] 研究并选择一个可行方案
+- [ ] 实现选定方案
+- [ ] 对比目标效果图调参
+- [ ] 确保鼠标跟随仍然工作
 
 ---
 
@@ -102,4 +90,12 @@ src/
 ├── config.js      # All parameters
 ├── main.js        # Scene, mouse events, render loop
 └── LightBeam.js   # Geometry + shader material
+```
+
+---
+
+## Running
+```bash
+npm run dev     # Start dev server (http://localhost:5174/)
+npm run build   # Production build
 ```
