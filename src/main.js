@@ -31,7 +31,7 @@ document.body.appendChild(renderer.domElement);
 
 // ---- Light Beam ----
 const beam = new LightBeam();
-scene.add(beam.group);  // 使用 group 包含双层
+scene.add(beam.mesh);
 
 // ---- Mouse State ----
 let mouseX = 0;
