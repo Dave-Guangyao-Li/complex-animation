@@ -1,26 +1,32 @@
 /**
- * Configuration - all adjustable parameters.
+ * Configuration - 双层光束配置
  */
 
 export const CONFIG = {
-  // Beam geometry
-  beam: {
-    width: 0.7,       // base width (wider, 矮胖)
-    length: 0.9,      // beam length from apex (shorter)
+  // 内层光束 (核心 - 窄、深)
+  innerBeam: {
+    width: 0.45,
+    length: 1.6,
+    opacity: 0.32,
+    edgeSoftness: 3.0,      // 用于 exp() 衰减
+    verticalPower: 0.35,
   },
 
-  // Appearance
+  // 外层光晕 (散射 - 宽、浅)
+  outerGlow: {
+    width: 1.0,
+    length: 2.0,
+    opacity: 0.1,
+    edgeSoftness: 2.0,      // 更柔和
+    verticalPower: 0.25,
+  },
+
+  // 通用
   color: '#555555',
-  opacity: 0.6,
 
   // Scene
   scene: {
     backgroundColor: '#f5f5f5',
     frustumSize: 2,
-  },
-
-  // Mouse rotation - 360 degrees
-  mouse: {
-    // No max angle limit - full 360 rotation
   },
 };

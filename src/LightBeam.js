@@ -1,7 +1,8 @@
 /**
- * LightBeam - rotating light beam with soft edges.
+ * LightBeam - 双层柔和光束
  *
- * Apex fixed at CENTER of screen, beam rotates 360° following mouse.
+ * 内层：窄、集中的核心光束
+ * 外层：宽、透明的散射光晕
  */
 
 import * as THREE from 'three';
@@ -15,105 +16,123 @@ const vertexShader = `
   }
 `;
 
+// 使用 exp() 实现更柔和的高斯式衰减
 const fragmentShader = `
   uniform vec3 uColor;
   uniform float uOpacity;
+  uniform float uEdgeSoftness;
+  uniform float uVerticalPower;
 
   varying vec2 vUv;
 
   void main() {
-    // Vertical: apex (y=1) is opaque, base (y=0) fades out
-    float verticalFade = pow(vUv.y, 0.5);
+    // 垂直渐变: 顶点(y=1)最亮，向底部(y=0)渐淡
+    float verticalFade = pow(vUv.y, uVerticalPower);
 
-    // Horizontal: center is opaque, edges fade
+    // 水平边缘: 使用 exp() 高斯式衰减，更柔和
     float centerDist = abs(vUv.x - 0.5) * 2.0;
-    float edgeFade = 1.0 - pow(centerDist, 1.5);
+    float edgeFade = exp(-centerDist * centerDist * uEdgeSoftness);
 
-    float alpha = verticalFade * edgeFade * uOpacity;
+    // 底部淡出
+    float baseFade = smoothstep(0.0, 0.25, vUv.y);
+
+    // 顶点也稍微淡一点，避免太尖锐
+    float apexFade = smoothstep(1.0, 0.92, vUv.y);
+
+    float alpha = verticalFade * edgeFade * baseFade * apexFade * uOpacity;
 
     gl_FragColor = vec4(uColor, alpha);
   }
 `;
 
+/**
+ * 创建单层光束 mesh
+ */
+function createBeamMesh(beamConfig) {
+  const positions = new Float32Array(9);
+  const uvs = new Float32Array([
+    0.5, 1.0,  // apex
+    0.0, 0.0,  // base left
+    1.0, 0.0,  // base right
+  ]);
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: new THREE.Color(CONFIG.color) },
+      uOpacity: { value: beamConfig.opacity },
+      uEdgeSoftness: { value: beamConfig.edgeSoftness },
+      uVerticalPower: { value: beamConfig.verticalPower },
+    },
+    vertexShader,
+    fragmentShader,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+
+  return { mesh: new THREE.Mesh(geometry, material), positions, config: beamConfig };
+}
+
+/**
+ * 更新光束顶点位置
+ */
+function updateBeamPositions(beamData, mouseX, mouseY) {
+  const { positions, config } = beamData;
+  const { width, length } = config;
+
+  const apexX = 0;
+  const apexY = 0;
+
+  const angle = Math.atan2(mouseY, mouseX);
+  const halfWidth = width / 2;
+
+  const dirX = Math.cos(angle);
+  const dirY = Math.sin(angle);
+  const perpX = -dirY;
+  const perpY = dirX;
+
+  const baseCenterX = apexX + dirX * length;
+  const baseCenterY = apexY + dirY * length;
+
+  // Apex
+  positions[0] = apexX;
+  positions[1] = apexY;
+  positions[2] = 0;
+
+  // Base left
+  positions[3] = baseCenterX - perpX * halfWidth;
+  positions[4] = baseCenterY - perpY * halfWidth;
+  positions[5] = 0;
+
+  // Base right
+  positions[6] = baseCenterX + perpX * halfWidth;
+  positions[7] = baseCenterY + perpY * halfWidth;
+  positions[8] = 0;
+
+  beamData.mesh.geometry.attributes.position.needsUpdate = true;
+}
+
 export class LightBeam {
   constructor() {
-    this.positions = new Float32Array(9);
-    this.uvs = new Float32Array([
-      0.5, 1.0,  // apex
-      0.0, 0.0,  // base left
-      1.0, 0.0,  // base right
-    ]);
+    // 创建双层
+    this.outer = createBeamMesh(CONFIG.outerGlow);
+    this.inner = createBeamMesh(CONFIG.innerBeam);
 
-    this.geometry = new THREE.BufferGeometry();
-    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    this.geometry.setAttribute('uv', new THREE.BufferAttribute(this.uvs, 2));
+    // Group: 外层先添加（在后面），内层后添加（在前面）
+    this.group = new THREE.Group();
+    this.group.add(this.outer.mesh);
+    this.group.add(this.inner.mesh);
 
-    this.material = new THREE.ShaderMaterial({
-      uniforms: {
-        uColor: { value: new THREE.Color(CONFIG.color) },
-        uOpacity: { value: CONFIG.opacity },
-      },
-      vertexShader,
-      fragmentShader,
-      transparent: true,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-
-    this.mesh = new THREE.Mesh(this.geometry, this.material);
-    this.update(0, 0);
+    // 初始位置
+    this.update(0, -1);
   }
 
-  /**
-   * Update beam rotation based on mouse position.
-   * @param {number} mouseX - normalized mouse X (-1 to 1)
-   * @param {number} mouseY - normalized mouse Y (-1 to 1)
-   */
   update(mouseX, mouseY) {
-    const { width, length } = CONFIG.beam;
-
-    // Apex at center of screen
-    const apexX = 0;
-    const apexY = 0;
-
-    // Calculate angle from center to mouse position (360° rotation)
-    const angle = Math.atan2(mouseY, mouseX);
-
-    const halfWidth = width / 2;
-
-    // Direction from apex toward mouse
-    const dirX = Math.cos(angle);
-    const dirY = Math.sin(angle);
-
-    // Perpendicular for base width
-    const perpX = -dirY;
-    const perpY = dirX;
-
-    // Base center is at apex + direction * length
-    const baseCenterX = apexX + dirX * length;
-    const baseCenterY = apexY + dirY * length;
-
-    // Base left and right
-    const leftX = baseCenterX - perpX * halfWidth;
-    const leftY = baseCenterY - perpY * halfWidth;
-    const rightX = baseCenterX + perpX * halfWidth;
-    const rightY = baseCenterY + perpY * halfWidth;
-
-    // Apex
-    this.positions[0] = apexX;
-    this.positions[1] = apexY;
-    this.positions[2] = 0;
-
-    // Base left
-    this.positions[3] = leftX;
-    this.positions[4] = leftY;
-    this.positions[5] = 0;
-
-    // Base right
-    this.positions[6] = rightX;
-    this.positions[7] = rightY;
-    this.positions[8] = 0;
-
-    this.geometry.attributes.position.needsUpdate = true;
+    updateBeamPositions(this.outer, mouseX, mouseY);
+    updateBeamPositions(this.inner, mouseX, mouseY);
   }
 }
