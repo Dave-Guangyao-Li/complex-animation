@@ -1,18 +1,14 @@
 /**
- * Light Beam Component
+ * LightBeam - rotating light beam with soft edges.
  *
- * Creates a triangle mesh with custom shader material for soft edge blur effect.
- * The effect simulates light shining down from a point source.
+ * Apex fixed at CENTER of screen, beam rotates 360° following mouse.
  */
 
 import * as THREE from 'three';
-import { LIGHT_BEAM_CONFIG } from './config.js';
-
-// ============ Shader Source ============
+import { CONFIG } from './config.js';
 
 const vertexShader = `
   varying vec2 vUv;
-
   void main() {
     vUv = uv;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
@@ -21,98 +17,103 @@ const vertexShader = `
 
 const fragmentShader = `
   uniform vec3 uColor;
-  uniform float uSoftness;
   uniform float uOpacity;
-  uniform float uVerticalPower;
-  uniform float uApexFade;
-  uniform float uBaseFade;
 
   varying vec2 vUv;
 
   void main() {
-    // === 1. Vertical gradient (from apex to base) ===
-    // vUv.y: 1.0 at apex, 0.0 at base
-    float distFromApex = 1.0 - vUv.y;
-    float verticalGradient = 1.0 - pow(distFromApex, uVerticalPower);
+    // Vertical: apex (y=1) is opaque, base (y=0) fades out
+    float verticalFade = pow(vUv.y, 0.5);
 
-    // === 2. Horizontal soft edges ===
-    // Distance from center axis (0 at center, 1 at edges)
+    // Horizontal: center is opaque, edges fade
     float centerDist = abs(vUv.x - 0.5) * 2.0;
+    float edgeFade = 1.0 - pow(centerDist, 1.5);
 
-    // Expected beam width at this height (0 at apex, 1 at base)
-    float beamWidth = max(1.0 - vUv.y, 0.001);
-
-    // How close to edge (0 = center, 1 = edge)
-    float edgeFactor = centerDist / beamWidth;
-
-    // Soft edge falloff using smoothstep
-    float softEdge = 1.0 - smoothstep(1.0 - uSoftness, 1.0 + uSoftness * 0.5, edgeFactor);
-
-    // === 3. Combine gradients ===
-    float alpha = verticalGradient * softEdge * uOpacity;
-
-    // === 4. Additional fades ===
-    // Fade at bottom edge (avoid hard cutoff)
-    alpha *= smoothstep(0.0, uBaseFade, vUv.y);
-
-    // Fade near apex (avoid hard point)
-    alpha *= smoothstep(1.0, uApexFade, vUv.y);
+    float alpha = verticalFade * edgeFade * uOpacity;
 
     gl_FragColor = vec4(uColor, alpha);
   }
 `;
 
-// ============ Factory Function ============
+export class LightBeam {
+  constructor() {
+    this.positions = new Float32Array(9);
+    this.uvs = new Float32Array([
+      0.5, 1.0,  // apex
+      0.0, 0.0,  // base left
+      1.0, 0.0,  // base right
+    ]);
 
-/**
- * Creates a light beam mesh with configurable parameters
- * @param {Object} overrides - Optional overrides for config values
- * @returns {THREE.Mesh} The light beam mesh
- */
-export function createLightBeam(overrides = {}) {
-  const { geometry: geoConfig, shader: shaderConfig } = LIGHT_BEAM_CONFIG;
+    this.geometry = new THREE.BufferGeometry();
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    this.geometry.setAttribute('uv', new THREE.BufferAttribute(this.uvs, 2));
 
-  // Merge overrides
-  const geo = { ...geoConfig, ...overrides.geometry };
-  const shader = { ...shaderConfig, ...overrides.shader };
+    this.material = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: new THREE.Color(CONFIG.color) },
+        uOpacity: { value: CONFIG.opacity },
+      },
+      vertexShader,
+      fragmentShader,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
 
-  // ============ Triangle Geometry ============
-  const geometry = new THREE.BufferGeometry();
+    this.mesh = new THREE.Mesh(this.geometry, this.material);
+    this.update(0, 0);
+  }
 
-  // Triangle vertices: apex at top center, base at bottom
-  const vertices = new Float32Array([
-    0.0, geo.apexY, 0.0,                    // Apex (top center)
-    -geo.baseWidth / 2, geo.baseY, 0.0,     // Bottom left
-    geo.baseWidth / 2, geo.baseY, 0.0       // Bottom right
-  ]);
+  /**
+   * Update beam rotation based on mouse position.
+   * @param {number} mouseX - normalized mouse X (-1 to 1)
+   * @param {number} mouseY - normalized mouse Y (-1 to 1)
+   */
+  update(mouseX, mouseY) {
+    const { width, length } = CONFIG.beam;
 
-  // UV coordinates for shader calculations
-  // Apex: (0.5, 1.0), Bottom-left: (0, 0), Bottom-right: (1, 0)
-  const uvs = new Float32Array([
-    0.5, 1.0,   // Apex
-    0.0, 0.0,   // Bottom left
-    1.0, 0.0    // Bottom right
-  ]);
+    // Apex at center of screen
+    const apexX = 0;
+    const apexY = 0;
 
-  geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    // Calculate angle from center to mouse position (360° rotation)
+    const angle = Math.atan2(mouseY, mouseX);
 
-  // ============ Shader Material ============
-  const material = new THREE.ShaderMaterial({
-    uniforms: {
-      uColor: { value: new THREE.Color(shader.color) },
-      uSoftness: { value: shader.softness },
-      uOpacity: { value: shader.opacity },
-      uVerticalPower: { value: shader.verticalPower },
-      uApexFade: { value: shader.apexFade },
-      uBaseFade: { value: shader.baseFade },
-    },
-    vertexShader,
-    fragmentShader,
-    transparent: true,
-    depthWrite: false,
-    side: THREE.DoubleSide
-  });
+    const halfWidth = width / 2;
 
-  return new THREE.Mesh(geometry, material);
+    // Direction from apex toward mouse
+    const dirX = Math.cos(angle);
+    const dirY = Math.sin(angle);
+
+    // Perpendicular for base width
+    const perpX = -dirY;
+    const perpY = dirX;
+
+    // Base center is at apex + direction * length
+    const baseCenterX = apexX + dirX * length;
+    const baseCenterY = apexY + dirY * length;
+
+    // Base left and right
+    const leftX = baseCenterX - perpX * halfWidth;
+    const leftY = baseCenterY - perpY * halfWidth;
+    const rightX = baseCenterX + perpX * halfWidth;
+    const rightY = baseCenterY + perpY * halfWidth;
+
+    // Apex
+    this.positions[0] = apexX;
+    this.positions[1] = apexY;
+    this.positions[2] = 0;
+
+    // Base left
+    this.positions[3] = leftX;
+    this.positions[4] = leftY;
+    this.positions[5] = 0;
+
+    // Base right
+    this.positions[6] = rightX;
+    this.positions[7] = rightY;
+    this.positions[8] = 0;
+
+    this.geometry.attributes.position.needsUpdate = true;
+  }
 }

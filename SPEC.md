@@ -1,145 +1,105 @@
 # Light Beam Effect - Spec Document
 
 ## Overview
-WebGL/Three.js implementation of a triangular light beam effect with soft blur edges for login page animation.
+WebGL/Three.js light beam effect - like a flashlight shining down from a fixed point.
+The beam **rotates** around the light source (apex) to follow the mouse cursor.
+
+## Figma Reference
+- Design: https://www.figma.com/design/oVasmPVZuoLyC6fBKoOxlX/ego?node-id=2778-111030
+- Use for **width reference only** (~392px at base)
+- Beam should **extend to bottom of viewport**
 
 ---
 
-## TODO Checklist (Spec-Driven)
+## Key Behaviors
 
-### Phase 0: Project Setup
-- [x] **0.1** Create `package.json` with three.js and vite dependencies
-- [x] **0.2** Run `npm install` - node_modules exists
-- [x] **0.3** Create `index.html` with basic structure
-- [x] **0.4** Verify `npm run dev` starts successfully
+### Mouse Tracking (Rotation)
+- Light source (apex) is **fixed** at top-center
+- Beam **rotates** around apex to follow mouse (like flashlight)
+- Mouse left → beam rotates left, mouse right → beam rotates right
 
-### Phase 1: Basic Scene
-- [x] **1.1** Create `src/main.js` with Three.js scene
-- [x] **1.2** Add OrthographicCamera (no perspective distortion)
-- [x] **1.3** Add resize event handler
-
-### Phase 2: Triangle Geometry
-- [x] **2.1** Create `src/config.js` - centralized configuration
-- [x] **2.2** Create `src/LightBeam.js` with BufferGeometry
-- [x] **2.3** Set up UV coordinates for shader calculations
-
-### Phase 3: Shader Implementation
-- [x] **3.1** Create ShaderMaterial framework
-- [x] **3.2** Implement vertical gradient (apex to base)
-- [x] **3.3** Implement horizontal soft edge effect
-- [x] **3.4** Add apex and base fade-out
-
-### Phase 4: Visual Tuning
-- [ ] **4.1** Adjust uniforms to match Figma design
-- [ ] **4.2** Test on different viewport sizes
-- [ ] **4.3** Document final configuration values
-
-### Phase 5: Future Extensions (Not Implemented)
-- [ ] **5.1** Mouse tracking - beam follows cursor
-- [ ] **5.2** Expand animation - beam opens/closes
-- [ ] **5.3** Multiple beams support
+### Visual Effect
+- **Top (apex)**: concentrated, darker, less blur
+- **Bottom (base)**: scattered, softer, more blur/fade
+- Triangle extends from top to **bottom of viewport**
+- Edges should be soft/blurred, not hard lines
 
 ---
 
-## Technical Stack
-- **Three.js** - WebGL rendering
-- **Vite** - Build tool and dev server
-- **Custom GLSL Shaders** - Soft edge blur effect
+## TODO Checklist
+
+### Phase 0: Project Setup ✓
+- [x] package.json, npm install, index.html, vite
+
+### Phase 1: Rotating Beam + Basic Blur (CURRENT)
+- [ ] **1.1** Light source fixed at top-center of screen
+- [ ] **1.2** Triangle extends to bottom of viewport
+- [ ] **1.3** Beam rotates around apex following mouse (rotation, not translation)
+- [ ] **1.4** Basic shader: top=concentrated, bottom=scattered/soft
+- [ ] **1.5** Soft edges (simple blur gradient)
+- [ ] **1.6** Verify: beam rotates like flashlight, extends full height
+
+### Phase 2: Visual Polish (LATER)
+- [ ] Smooth rotation interpolation (lerp)
+- [ ] Fine-tune blur/scatter parameters
+- [ ] Animation effects
+
+---
+
+## Technical Approach
+
+### Geometry
+```
+Apex (fixed):  (0, topY)           <- light source, doesn't move
+Base left:     rotate(angle) from apex
+Base right:    rotate(angle) from apex
+```
+
+### Rotation Math
+```javascript
+// Mouse X (-1 to 1) → rotation angle
+const maxAngle = 0.3; // radians, ~17 degrees
+const angle = mouseX * maxAngle;
+
+// Base points rotate around apex
+const baseY = -1.0; // bottom of viewport
+const halfWidth = 0.28; // half of beam width at base
+
+// Rotated positions
+baseLeft.x  = apex.x + Math.sin(angle) * (baseY - apex.y) - Math.cos(angle) * halfWidth;
+baseRight.x = apex.x + Math.sin(angle) * (baseY - apex.y) + Math.cos(angle) * halfWidth;
+```
+
+### Shader (Simple)
+```glsl
+// Vertical gradient: top=opaque, bottom=transparent
+float fade = vUv.y; // 1 at top, 0 at bottom
+
+// Horizontal soft edges
+float edgeFade = 1.0 - pow(abs(vUv.x - 0.5) * 2.0, 2.0);
+
+float alpha = fade * edgeFade * uOpacity;
+```
+
+---
+
+## Configuration (`src/config.js`)
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `beam.width` | 0.56 | Base width (ref Figma 392px) |
+| `beam.topY` | 1.0 | Apex Y (top of viewport) |
+| `beam.bottomY` | -1.0 | Base Y (bottom of viewport) |
+| `color` | '#555555' | Beam color |
+| `opacity` | 0.6 | Max opacity at apex |
+| `mouse.maxAngle` | 0.3 | Max rotation in radians (~17°) |
 
 ---
 
 ## File Structure
 ```
-complex-animation/
-├── SPEC.md                   # This spec document
-├── package.json              # Dependencies
-├── index.html                # Entry HTML
-└── src/
-    ├── config.js             # Configuration center
-    ├── main.js               # Scene setup, render loop
-    └── LightBeam.js          # Light beam component + shaders
+src/
+├── config.js      # All parameters
+├── main.js        # Scene, mouse events, render loop
+└── LightBeam.js   # Geometry + shader material
 ```
-
----
-
-## Configuration Reference (`src/config.js`)
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `geometry.apexY` | 0.9 | Apex (top) Y coordinate |
-| `geometry.baseY` | -0.7 | Base (bottom) Y coordinate |
-| `geometry.baseWidth` | 0.8 | Width at base |
-| `shader.color` | '#404045' | Beam color (dark gray) |
-| `shader.softness` | 0.3 | Edge blur amount (0-1) |
-| `shader.opacity` | 0.35 | Overall opacity (0-1) |
-| `shader.verticalPower` | 0.7 | Vertical gradient curve |
-| `shader.apexFade` | 0.85 | Apex fade position |
-| `shader.baseFade` | 0.15 | Base fade position |
-
----
-
-## Shader Algorithm
-
-### Fragment Shader Core Logic
-```glsl
-// 1. Vertical gradient - fade from apex to base
-float verticalGradient = 1.0 - pow(1.0 - vUv.y, uVerticalPower);
-
-// 2. Horizontal soft edges - distance from center axis
-float centerDist = abs(vUv.x - 0.5) * 2.0;
-float beamWidth = max(1.0 - vUv.y, 0.001);
-float edgeFactor = centerDist / beamWidth;
-float softEdge = 1.0 - smoothstep(1.0 - uSoftness, 1.0, edgeFactor);
-
-// 3. Combine for final alpha
-float alpha = verticalGradient * softEdge * uOpacity;
-```
-
----
-
-## Verification Checkpoints
-
-| Phase | What to Verify | How to Verify | If Failed |
-|-------|----------------|---------------|-----------|
-| 0 | Project runs | `npm run dev` no errors | Check node version, dependencies |
-| 1 | Scene renders | Browser shows gray background | Check renderer.domElement mount |
-| 2 | Triangle visible | See solid triangle | Check geometry vertices, camera position |
-| 3.2 | Vertical gradient | Brighter at top, fades down | Check vUv.y, shader uniforms |
-| 3.3 | Soft edges | Blurred edges, not hard | Adjust uSoftness, check smoothstep |
-| 4 | Visual match | Compare with Figma | Tune config parameters |
-
----
-
-## Debugging Tips
-
-Output debug colors in fragment shader:
-```glsl
-// Debug UV coordinates
-gl_FragColor = vec4(vUv.x, vUv.y, 0.0, 1.0);
-
-// Debug vertical gradient
-gl_FragColor = vec4(vec3(verticalGradient), 1.0);
-
-// Debug soft edge
-gl_FragColor = vec4(vec3(softEdge), 1.0);
-```
-
----
-
-## Running the Project
-
-```bash
-# Install dependencies
-npm install
-
-# Start dev server
-npm run dev
-
-# Build for production
-npm run build
-```
-
----
-
-## Figma Reference
-Design: https://www.figma.com/design/oVasmPVZuoLyC6fBKoOxlX/ego?node-id=2778-111030
